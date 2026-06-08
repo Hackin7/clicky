@@ -250,6 +250,10 @@ impl Ipod4g {
         }
 
         if self.irq_pending.check() {
+            self.irq_pending.clear();
+        }
+
+        {
             use armv4t_emu::Exception;
 
             let (cpu_status, cop_status) = devices.intcon.interrupt_status();
@@ -263,18 +267,10 @@ impl Ipod4g {
                 if status.irq {
                     devices.cpucon.wake_on_interrupt(*cpuid);
                     core.exception(Exception::Interrupt);
-
-                    if core.irq_enable() {
-                        self.irq_pending.clear();
-                    }
                 }
                 if status.fiq {
                     devices.cpucon.wake_on_interrupt(*cpuid);
                     core.exception(Exception::FastInterrupt);
-
-                    if core.fiq_enable() {
-                        self.irq_pending.clear();
-                    }
                 }
             }
         }
