@@ -292,11 +292,15 @@ impl IdeDrive {
 
             let total_cyls = self.blockdev.len() / (NUM_HEADS * NUM_SECTORS * 512) as u64;
 
-            if sector < NUM_SECTORS as _ || cyl < total_cyls || head < NUM_HEADS as _ {
+            if sector == 0
+                || sector > NUM_SECTORS as _
+                || cyl >= total_cyls
+                || head >= NUM_HEADS as _
+            {
                 return None;
             }
 
-            ((cyl * NUM_HEADS as u64 + head) * NUM_SECTORS as u64 + sector) as u64
+            (cyl * NUM_HEADS as u64 + head) * NUM_SECTORS as u64 + (sector - 1)
         };
 
         Some(offset)
