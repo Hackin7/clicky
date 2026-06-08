@@ -902,7 +902,27 @@ impl IdeController {
     pub fn read8(&mut self, reg: IdeReg) -> MemResult<u8> {
         use IdeReg::*;
 
-        let ide = selected_ide!(self)?;
+        let ide = match self.selected_device {
+            IdeIdx::IDE0 => self.ide0.as_mut(),
+            IdeIdx::IDE1 => self.ide1.as_mut(),
+        };
+
+        let ide = match ide {
+            Some(ide) => ide,
+            None => {
+                return match reg {
+                    Status | Command | AltStatus | DevControl => Ok(0),
+                    _ => Err(ContractViolation {
+                        msg: format!(
+                            "tried to access {} when no drive is connected",
+                            self.selected_device
+                        ),
+                        severity: Info,
+                        stub_val: Some(0xff),
+                    }),
+                };
+            }
+        };
 
         match reg {
             Data => ide.data_read8(),
