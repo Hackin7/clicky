@@ -71,6 +71,7 @@ pub enum IdeReg {
 #[derive(Debug, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u8)]
 enum IdeCmd {
+    Recalibrate = 0x10,
     IdentifyDevice = 0xec,
     ReadMultiple = 0xc4,
     WriteMultiple = 0xc5,
@@ -91,6 +92,8 @@ enum IdeCmd {
 
     Sleep = 0x99,
     SleepAlt = 0xe6,
+
+    ReadNativeMaxAddress = 0xf8,
 
     // not strictly ATA-2, but the iPod flash ROM seems to use this cmd...
     FlushCache = 0xe7,
@@ -266,6 +269,11 @@ impl IdeDrive {
         }
     }
 
+    fn pulse_irq(&mut self) {
+        self.irq.clear();
+        self.irq.assert();
+    }
+
     /// Handles LBA/CHS offset translation, returning the offset into the
     /// blockdev (in blocks, _not bytes_).
     ///
@@ -321,7 +329,7 @@ impl IdeDrive {
                     .set_bit(reg::STATUS::DRQ, false)
                     .set_bit(reg::STATUS::BSY, false);
 
-                self.irq.assert();
+                self.pulse_irq();
                 self.dmarq.clear();
             } else {
                 // the next sector needs to be loaded
@@ -346,7 +354,7 @@ impl IdeDrive {
 
                     // DMA only fires a single IRQ at the end of the transfer
                     if !self.cfg.transfer_mode.is_dma() {
-                        self.irq.assert();
+                        self.pulse_irq();
                     }
 
                     Ok(())
@@ -398,7 +406,7 @@ impl IdeDrive {
 
                 // DMA only fires a single IRQ at the end of the transfer
                 if !self.cfg.transfer_mode.is_dma() {
-                    self.irq.assert();
+                    self.pulse_irq();
                 }
 
                 // check if there are no more sectors remaining
@@ -409,7 +417,7 @@ impl IdeDrive {
                         .set_bit(reg::STATUS::DRDY, true)
                         .set_bit(reg::STATUS::DRQ, false);
 
-                    self.irq.assert();
+                    self.pulse_irq();
                     self.dmarq.clear();
                 }
 
@@ -436,6 +444,16 @@ impl IdeDrive {
 
         use IdeCmd::*;
         match IdeCmd::try_from(cmd) {
+            Ok(Recalibrate) => {
+                (self.reg.status)
+                    .set_bit(reg::STATUS::BSY, false)
+                    .set_bit(reg::STATUS::DRDY, true)
+                    .set_bit(reg::STATUS::DSC, true)
+                    .set_bit(reg::STATUS::DRQ, false);
+
+                self.pulse_irq();
+                Ok(())
+            }
             Ok(IdentifyDevice) => {
                 let len = self.blockdev.len();
 
@@ -464,7 +482,7 @@ impl IdeDrive {
                     .set_bit(reg::STATUS::BSY, false)
                     .set_bit(reg::STATUS::DRQ, true);
 
-                self.irq.assert();
+                self.pulse_irq();
 
                 Ok(())
             }
@@ -540,7 +558,7 @@ impl IdeDrive {
                         .set_bit(reg::STATUS::DRDY, true)
                         .set_bit(reg::STATUS::DRQ, true);
 
-                    // TODO: fire interrupt?
+                    self.pulse_irq();
 
                     Ok(())
                 })?;
@@ -674,18 +692,39 @@ impl IdeDrive {
                 Ok(())
             }
 
+            Ok(ReadNativeMaxAddress) => {
+                let max_lba = ((self.blockdev.len() / 512).saturating_sub(1)).min(0x0fff_ffff);
+                self.reg.lba0_sector_no = max_lba.get_bits(0..=7) as u8;
+                self.reg.lba1_cyl_lo = max_lba.get_bits(8..=15) as u8;
+                self.reg.lba2_cyl_hi = max_lba.get_bits(16..=23) as u8;
+                self.reg.lba3_dev_head = (self.reg.lba3_dev_head & 0xf0)
+                    | max_lba.get_bits(24..=27) as u8;
+                (self.reg.status)
+                    .set_bit(reg::STATUS::BSY, false)
+                    .set_bit(reg::STATUS::DRDY, true)
+                    .set_bit(reg::STATUS::DSC, true)
+                    .set_bit(reg::STATUS::DRQ, false);
+
+                self.pulse_irq();
+                Ok(())
+            }
+
             Ok(Sleep) | Ok(SleepAlt) => {
                 // uhh, it's an emulated drive.
                 // just assert the irq and go on our merry way
                 (self.reg.status).set_bit(reg::STATUS::BSY, false);
 
-                self.irq.assert();
+                self.pulse_irq();
                 Ok(())
             }
 
             Ok(InitializeDriveParameters) => {
-                (self.reg.status).set_bit(reg::STATUS::BSY, false);
-                self.irq.assert();
+                (self.reg.status)
+                    .set_bit(reg::STATUS::BSY, false)
+                    .set_bit(reg::STATUS::DRDY, true)
+                    .set_bit(reg::STATUS::DSC, true)
+                    .set_bit(reg::STATUS::DRQ, false);
+                self.pulse_irq();
                 Ok(())
             }
 
@@ -909,5 +948,73 @@ impl IdeController {
             }
             DataLatch => Err(Unimplemented),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::block::backend::Mem;
+
+    fn controller_with_disk() -> IdeController {
+        let pending = irq::Pending::new();
+        let (irq_tx, _) = irq::new(pending.clone(), "IDE test");
+        let (dmarq_tx, _) = irq::new(pending, "IDE DMA test");
+        let mut ide = IdeController::new(irq_tx, dmarq_tx);
+        ide.attach(IdeIdx::IDE0, Box::new(Mem::new(vec![0; 512 * 4].into_boxed_slice())));
+        ide
+    }
+
+    #[test]
+    fn recalibrate_command_completes_and_asserts_irq() {
+        let mut ide = controller_with_disk();
+
+        ide.write8(IdeReg::Command, 0x10).unwrap();
+
+        assert!(ide.irq_state(IdeIdx::IDE0));
+        let status = ide.read8(IdeReg::AltStatus).unwrap();
+        assert!(!status.get_bit(reg::STATUS::BSY));
+        assert!(status.get_bit(reg::STATUS::DRDY));
+        assert!(status.get_bit(reg::STATUS::DSC));
+    }
+
+    #[test]
+    fn read_sectors_asserts_irq_when_data_is_ready() {
+        let mut ide = controller_with_disk();
+        ide.write8(IdeReg::SectorCount, 1).unwrap();
+        ide.write8(IdeReg::SectorNo, 1).unwrap();
+        ide.write8(IdeReg::CylinderLo, 0).unwrap();
+        ide.write8(IdeReg::CylinderHi, 0).unwrap();
+        ide.write8(IdeReg::DeviceHead, 0xe0).unwrap();
+
+        ide.write8(IdeReg::Command, IdeCmd::ReadSectors as u8)
+            .unwrap();
+
+        assert!(ide.irq_state(IdeIdx::IDE0));
+        let status = ide.read8(IdeReg::AltStatus).unwrap();
+        assert!(!status.get_bit(reg::STATUS::BSY));
+        assert!(status.get_bit(reg::STATUS::DRDY));
+        assert!(status.get_bit(reg::STATUS::DSC));
+        assert!(status.get_bit(reg::STATUS::DRQ));
+    }
+
+    #[test]
+    fn read_native_max_address_returns_last_lba_and_asserts_irq() {
+        let mut ide = controller_with_disk();
+        ide.write8(IdeReg::DeviceHead, 0xe0).unwrap();
+
+        ide.write8(IdeReg::Command, 0xf8).unwrap();
+
+        assert!(ide.irq_state(IdeIdx::IDE0));
+        assert_eq!(ide.read8(IdeReg::SectorNo).unwrap(), 3);
+        assert_eq!(ide.read8(IdeReg::CylinderLo).unwrap(), 0);
+        assert_eq!(ide.read8(IdeReg::CylinderHi).unwrap(), 0);
+        assert_eq!(ide.read8(IdeReg::DeviceHead).unwrap() & 0x0f, 0);
+        let status = ide.read8(IdeReg::AltStatus).unwrap();
+        assert!(!status.get_bit(reg::STATUS::BSY));
+        assert!(status.get_bit(reg::STATUS::DRDY));
+        assert!(status.get_bit(reg::STATUS::DSC));
+        assert!(!status.get_bit(reg::STATUS::DRQ));
     }
 }

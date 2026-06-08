@@ -168,7 +168,7 @@ impl Memory for EIDECon {
             0x018 => Ok(self.ide1_cfg.secondary_timing[0] = val),
             0x01c => Ok(self.ide1_cfg.secondary_timing[1] = val),
             0x028 => {
-                if val.get_bit(4) {
+                if val.get_bit(3) || val.get_bit(4) {
                     self.ide.clear_irq(IdeIdx::IDE0)
                 }
                 if val.get_bit(5) {
@@ -198,5 +198,49 @@ impl Memory for EIDECon {
 
             _ => Err(Unexpected),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::block::backend::Mem;
+    use crate::error::MemException;
+
+    fn eide_with_disk() -> EIDECon {
+        let pending = irq::Pending::new();
+        let (irq_tx, _) = irq::new(pending.clone(), "EIDE test");
+        let (dmarq_tx, _) = irq::new(pending, "EIDE DMA test");
+        let mut eide = EIDECon::new(irq_tx, dmarq_tx);
+        eide.as_ide().attach(
+            IdeIdx::IDE0,
+            Box::new(Mem::new(vec![0; 512 * 4].into_boxed_slice())),
+        );
+        eide
+    }
+
+    fn ide0_cfg(eide: &mut EIDECon) -> u32 {
+        match eide.r32(0x028) {
+            Err(MemException::StubRead(_, val)) => val,
+            other => panic!("unexpected IDE0 cfg read result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ide0_cfg_bit3_ack_clears_ide0_irq() {
+        let mut eide = eide_with_disk();
+
+        eide.w32(0x1fc, 0x10).unwrap();
+        assert!(ide0_cfg(&mut eide).get_bit(3));
+        assert!(ide0_cfg(&mut eide).get_bit(4));
+
+        assert!(matches!(
+            eide.w32(0x028, 1 << 3),
+            Err(MemException::StubWrite(_, ()))
+        ));
+
+        assert!(!ide0_cfg(&mut eide).get_bit(3));
+        assert!(!ide0_cfg(&mut eide).get_bit(4));
     }
 }

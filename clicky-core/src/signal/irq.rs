@@ -41,7 +41,7 @@ impl Pending {
     /// `check_pending`.
     #[inline]
     pub fn clear(&self) -> bool {
-        self.trigger.check()
+        self.trigger.check_and_clear()
     }
 }
 
@@ -84,5 +84,22 @@ impl Sender {
     #[inline]
     pub fn is_asserting(&self) -> bool {
         self.master.is_asserting()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_clear_unsets_pending_trigger() {
+        let pending = Pending::new();
+        let (mut sender, _) = new(pending.clone(), "test");
+
+        sender.assert();
+
+        assert!(pending.check());
+        assert!(pending.clear());
+        assert!(!pending.check());
     }
 }
