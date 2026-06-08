@@ -278,14 +278,9 @@ impl Pcf5060xImpl {
         let adcdat1;
         let adcdat2;
         match adcmux {
-            0b0001 => {
-                // BATVOLT, subtractor
-                adcdat1 = 0;
-                adcdat2 = 0;
-            }
-            0b0011 => {
-                // ADCIN1, subtractor
-                adcdat1 = 0;
+            0b0000 | 0b0001 | 0b0010 | 0b0011 => {
+                // Battery and ADCIN1 paths; report about 4.0V.
+                adcdat1 = 682;
                 adcdat2 = 0;
             }
             0b0101 => {
@@ -299,14 +294,15 @@ impl Pcf5060xImpl {
                 adcdat2 = 0;
             }
             _ => {
-                return Err(Unimplemented);
+                adcdat1 = 0;
+                adcdat2 = 0;
             }
         }
 
         use Reg::*;
         match reg {
             ADCS1__ => Err(StubRead(Info, adcdat1 >> 2 & 0xFF)),
-            ADCS2__ => Err(StubRead(Info, adcrdy | (adcdat1 << 8) & 0x3)),
+            ADCS2__ => Err(StubRead(Info, adcrdy | (adcdat1 & 0x3))),
             ADCS3__ => Err(StubRead(Info, adcdat2 >> 2 & 0xFF)),
             _ => Err(Unimplemented),
         }
@@ -412,5 +408,21 @@ impl Pcf5060xImpl {
             GPOC1__ => Ok(self.gp0c1 = data),
             _ => Err(Unimplemented),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::error::MemException;
+
+    #[test]
+    fn adcs2_read_with_default_mux_reports_ready() {
+        let mut pcf = Pcf5060x::new();
+
+        pcf.write(Reg::ADCS2__ as u8).unwrap();
+
+        assert!(matches!(pcf.read(), Err(MemException::StubRead(_, 0x82))));
     }
 }
