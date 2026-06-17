@@ -493,7 +493,12 @@ impl Cpu {
                 let pre_incr = (p == u) as u32;
 
                 let mut rem = reglist;
-                let restore_user_bank = l == 1 && s == 1 && (rem & (1 << reg::PC)) != 0;
+                let restore_bank = if l == 1 && s == 1 && (rem & (1 << reg::PC)) != 0 {
+                    let spsr = self.reg[reg::SPSR];
+                    Mode::from_bits(spsr.extract(0, 5) as u8).map(|mode| mode.reg_bank())
+                } else {
+                    None
+                };
                 if s == 0 || (rem & (1 << reg::PC)) != 0 {
                     if w == 1 {
                         self.reg[rn] = post_addr;
@@ -518,8 +523,8 @@ impl Cpu {
                         } else {
                             // load
                             let val = mmu.r32(idx_addr);
-                            if restore_user_bank && r != reg::PC {
-                                self.reg.set(0, r, val);
+                            if let Some(bank) = restore_bank.filter(|_| r != reg::PC) {
+                                self.reg.set(bank, r, val);
                             } else {
                                 self.reg[r] = val;
                             }
@@ -741,7 +746,7 @@ mod test {
         use crate::ExampleMem;
 
         let mut mmu = ExampleMem::new();
-        // LDMIA r2!, {sp-lr,pc}^ restores user-bank registers and CPSR.
+        // LDMIA r2!, {sp-lr,pc}^ restores registers for the SPSR target mode.
         mmu.w32(0x00, 0xe8f2_e000);
         mmu.w32(0x200, 0x1111_2222);
         mmu.w32(0x204, 0x3333_4444);
@@ -765,5 +770,36 @@ mod test {
         assert_eq!(0x20c, cpu.reg_get(Mode::Supervisor, 2));
         assert_eq!(0xaaaa_0000, cpu.reg_get(Mode::Supervisor, reg::SP));
         assert_eq!(0xbbbb_1111, cpu.reg_get(Mode::Supervisor, reg::LR));
+    }
+
+    #[test]
+    fn block_transfer_with_pc_and_s_bit_restores_privileged_bank_from_spsr() {
+        use crate::ExampleMem;
+
+        let mut mmu = ExampleMem::new();
+        // LDMIA r2!, {sp-lr,pc}^ returning to supervisor keeps supervisor banked regs.
+        mmu.w32(0x00, 0xe8f2_e000);
+        mmu.w32(0x200, 0x1111_2222);
+        mmu.w32(0x204, 0x3333_4444);
+        mmu.w32(0x208, 0x5555_6666);
+
+        let mut cpu = Cpu::new();
+        cpu.reg_set(Mode::Supervisor, reg::PC, 0x00);
+        cpu.reg_set(Mode::Supervisor, reg::CPSR, 0xd3);
+        cpu.reg_set(Mode::Supervisor, reg::SPSR, 0x6000_0013);
+        cpu.reg_set(Mode::Supervisor, 2, 0x200);
+        cpu.reg_set(Mode::User, reg::SP, 0xaaaa_0000);
+        cpu.reg_set(Mode::User, reg::LR, 0xbbbb_1111);
+
+        assert!(cpu.step(&mut mmu));
+
+        assert_eq!(Mode::Supervisor, cpu.mode());
+        assert_eq!(0x6000_0013, cpu.reg_get(Mode::Supervisor, reg::CPSR));
+        assert_eq!(0x1111_2222, cpu.reg_get(Mode::Supervisor, reg::SP));
+        assert_eq!(0x3333_4444, cpu.reg_get(Mode::Supervisor, reg::LR));
+        assert_eq!(0x5555_6666, cpu.reg_get(Mode::Supervisor, reg::PC));
+        assert_eq!(0x20c, cpu.reg_get(Mode::Supervisor, 2));
+        assert_eq!(0xaaaa_0000, cpu.reg_get(Mode::User, reg::SP));
+        assert_eq!(0xbbbb_1111, cpu.reg_get(Mode::User, reg::LR));
     }
 }

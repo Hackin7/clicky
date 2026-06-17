@@ -4,7 +4,7 @@ All notable changes to this project should be documented in this file. Future co
 
 ## Unreleased
 
-- Fixed ARM exception-return block transfers (`LDM ... ^` with PC) to restore user-bank registers before restoring CPSR.
+- Fixed ARM exception-return block transfers (`LDM ... ^` with PC) to restore registers into the bank selected by SPSR before restoring CPSR.
 - Validated SPSR writes as well as CPSR writes so invalid saved mode bits cannot poison later exception returns.
 - Fixed ARM block-transfer writeback for user-bank `LDM/STM ... ^` instructions, which Linux uses around privileged/user context transitions.
 - Patched the vendored ARM emulator to validate CPSR restores/writes, avoiding a post-root iPodLinux panic when userland startup hits invalid mode bits.
