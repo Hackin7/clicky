@@ -4,6 +4,8 @@ All notable changes to this project should be documented in this file. Future co
 
 ## Unreleased
 
+- Patched the vendored ARM emulator to validate CPSR restores/writes, avoiding a post-root iPodLinux panic when userland startup hits invalid mode bits.
+
 ## 2026-06-08
 
 ### Added
