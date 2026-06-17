@@ -802,4 +802,28 @@ mod test {
         assert_eq!(0xaaaa_0000, cpu.reg_get(Mode::User, reg::SP));
         assert_eq!(0xbbbb_1111, cpu.reg_get(Mode::User, reg::LR));
     }
+
+    #[test]
+    fn zero_spsr_mode_falls_back_to_user_mode_on_exception_return() {
+        use crate::ExampleMem;
+
+        let mut mmu = ExampleMem::new();
+        // MSR SPSR_fc, r0; MOVS pc, lr
+        mmu.w32(0x00, 0xe169_f000);
+        mmu.w32(0x04, 0xe1b0_f00e);
+
+        let mut cpu = Cpu::new();
+        cpu.reg_set(Mode::Supervisor, reg::PC, 0x00);
+        cpu.reg_set(Mode::Supervisor, reg::CPSR, 0xd3);
+        cpu.reg_set(Mode::Supervisor, reg::SPSR, 0x6000_0013);
+        cpu.reg_set(Mode::Supervisor, reg::LR, 0x100);
+        cpu.reg_set(Mode::Supervisor, 0, 0);
+
+        assert!(cpu.step(&mut mmu));
+        assert_eq!(0x10, cpu.reg_get(Mode::Supervisor, reg::SPSR));
+
+        assert!(cpu.step(&mut mmu));
+        assert_eq!(Mode::User, cpu.mode());
+        assert_eq!(0x100, cpu.reg_get(Mode::User, reg::PC));
+    }
 }

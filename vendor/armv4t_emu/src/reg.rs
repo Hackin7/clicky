@@ -139,7 +139,8 @@ impl RegFile {
                 );
 
                 let oldval = self.reg[REG_MAP[bank][reg as usize]];
-                val = (val & !0x1f) | (oldval & 0x1f);
+                let fallback_mode = if reg == SPSR && bits == 0 { 0x10 } else { oldval & 0x1f };
+                val = (val & !0x1f) | fallback_mode;
             }
         }
 

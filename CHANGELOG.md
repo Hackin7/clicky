@@ -4,6 +4,7 @@ All notable changes to this project should be documented in this file. Future co
 
 ## Unreleased
 
+- Treated zero-mode SPSR writes as user-mode returns, which lets iPodLinux init enter with its user stack instead of the supervisor stack.
 - Fixed ARM exception-return block transfers (`LDM ... ^` with PC) to restore registers into the bank selected by SPSR before restoring CPSR.
 - Validated SPSR writes as well as CPSR writes so invalid saved mode bits cannot poison later exception returns.
 - Fixed ARM block-transfer writeback for user-bank `LDM/STM ... ^` instructions, which Linux uses around privileged/user context transitions.
