@@ -168,9 +168,9 @@ impl Memory for EIDECon {
             0x018 => Ok(self.ide1_cfg.secondary_timing[0] = val),
             0x01c => Ok(self.ide1_cfg.secondary_timing[1] = val),
             0x028 => {
-                if val.get_bit(3) || val.get_bit(4) {
-                    self.ide.clear_irq(IdeIdx::IDE0)
-                }
+                // The PP EIDE config bits acknowledge the controller-side IRQ status,
+                // but Linux still expects the ATA status read to complete and clear
+                // the drive interrupt. Clearing the drive here loses that completion.
                 if val.get_bit(5) {
                     self.ide.clear_irq(IdeIdx::IDE1)
                 }
@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn ide0_cfg_bit3_ack_clears_ide0_irq() {
+    fn ide0_cfg_ack_preserves_drive_irq_until_status_read() {
         let mut eide = eide_with_disk();
 
         eide.w32(0x1fc, 0x10).unwrap();
@@ -240,6 +240,10 @@ mod tests {
             Err(MemException::StubWrite(_, ()))
         ));
 
+        assert!(ide0_cfg(&mut eide).get_bit(3));
+        assert!(ide0_cfg(&mut eide).get_bit(4));
+
+        assert_eq!(eide.r32(0x1fc).unwrap(), 0x50);
         assert!(!ide0_cfg(&mut eide).get_bit(3));
         assert!(!ide0_cfg(&mut eide).get_bit(4));
     }

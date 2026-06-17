@@ -4,6 +4,9 @@ All notable changes to this project should be documented in this file. Future co
 
 ## Unreleased
 
+- Fixed CHS sector translation in IDE reads so Rockbox can address sectors through its legacy disk path.
+- Reported a ready non-busy status for absent secondary IDE drives so probing another drive does not poison the active disk state.
+- Fixed PP EIDE IRQ acknowledgement so IDE completions are preserved until the ATA status register is read, preventing guests from missing disk interrupts during boot.
 - Patched the git-sourced ARM emulator dependency on master through the vendored crate so iPodLinux ARM fixes are used by clicky-core.
 - Treated zero-mode SPSR writes as user-mode returns, which lets iPodLinux init enter with its user stack instead of the supervisor stack.
 - Fixed ARM exception-return block transfers (`LDM ... ^` with PC) to restore registers into the bank selected by SPSR before restoring CPSR.
