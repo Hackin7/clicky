@@ -277,7 +277,7 @@ impl Cpu {
                     if rs == reg::CPSR {
                         self.reg.set(0, reg::CPSR, new_psr);
                     } else {
-                        self.reg[rs] = new_psr;
+                        self.reg.set(self.reg.mode().reg_bank(), reg::SPSR, new_psr);
                     }
                 };
             }
@@ -493,6 +493,7 @@ impl Cpu {
                 let pre_incr = (p == u) as u32;
 
                 let mut rem = reglist;
+                let restore_user_bank = l == 1 && s == 1 && (rem & (1 << reg::PC)) != 0;
                 if s == 0 || (rem & (1 << reg::PC)) != 0 {
                     if w == 1 {
                         self.reg[rn] = post_addr;
@@ -516,7 +517,12 @@ impl Cpu {
                             mmu.w32(idx_addr, val);
                         } else {
                             // load
-                            self.reg[r] = mmu.r32(idx_addr);
+                            let val = mmu.r32(idx_addr);
+                            if restore_user_bank && r != reg::PC {
+                                self.reg.set(0, r, val);
+                            } else {
+                                self.reg[r] = val;
+                            }
                             if r == reg::PC && s == 1 {
                                 let spsr = self.reg[reg::SPSR];
                                 self.reg.set(0, reg::CPSR, spsr);
@@ -541,6 +547,10 @@ impl Cpu {
                             self.reg.set(0, r, val);
                         };
                         rem -= 1u32 << r;
+                    }
+
+                    if w == 1 {
+                        self.reg[rn] = post_addr;
                     }
                 }
             }
@@ -699,4 +709,61 @@ mod test {
     );
     emutest!(emutest_arm7, [(0x1fc, 1), (0x200, 1), (0x204, 0x200)]);
     emutest!(emutest_arm8, [(0x200, 10), (0x204, 83)]);
+
+    #[test]
+    fn block_transfer_user_bank_writeback_updates_current_base() {
+        use crate::ExampleMem;
+
+        let mut mmu = ExampleMem::new();
+        // STMIA r2!, {sp-lr}^ stores user-bank registers while running privileged.
+        mmu.w32(0x00, 0xe8e2_6000);
+
+        let mut cpu = Cpu::new();
+        cpu.reg_set(Mode::Supervisor, reg::PC, 0x00);
+        cpu.reg_set(Mode::Supervisor, reg::CPSR, 0xd3);
+        cpu.reg_set(Mode::Supervisor, 2, 0x200);
+        cpu.reg_set(Mode::Supervisor, reg::SP, 0xaaaa_0000);
+        cpu.reg_set(Mode::Supervisor, reg::LR, 0xbbbb_1111);
+        cpu.reg_set(Mode::User, reg::SP, 0x1111_2222);
+        cpu.reg_set(Mode::User, reg::LR, 0x3333_4444);
+
+        assert!(cpu.step(&mut mmu));
+
+        assert_eq!(0x1111_2222, mmu.r32(0x200));
+        assert_eq!(0x3333_4444, mmu.r32(0x204));
+        assert_eq!(0x208, cpu.reg_get(Mode::Supervisor, 2));
+        assert_eq!(0xaaaa_0000, cpu.reg_get(Mode::Supervisor, reg::SP));
+        assert_eq!(0xbbbb_1111, cpu.reg_get(Mode::Supervisor, reg::LR));
+    }
+
+    #[test]
+    fn block_transfer_with_pc_and_s_bit_restores_user_bank_and_cpsr() {
+        use crate::ExampleMem;
+
+        let mut mmu = ExampleMem::new();
+        // LDMIA r2!, {sp-lr,pc}^ restores user-bank registers and CPSR.
+        mmu.w32(0x00, 0xe8f2_e000);
+        mmu.w32(0x200, 0x1111_2222);
+        mmu.w32(0x204, 0x3333_4444);
+        mmu.w32(0x208, 0x5555_6666);
+
+        let mut cpu = Cpu::new();
+        cpu.reg_set(Mode::Supervisor, reg::PC, 0x00);
+        cpu.reg_set(Mode::Supervisor, reg::CPSR, 0xd3);
+        cpu.reg_set(Mode::Supervisor, reg::SPSR, 0x6000_0010);
+        cpu.reg_set(Mode::Supervisor, 2, 0x200);
+        cpu.reg_set(Mode::Supervisor, reg::SP, 0xaaaa_0000);
+        cpu.reg_set(Mode::Supervisor, reg::LR, 0xbbbb_1111);
+
+        assert!(cpu.step(&mut mmu));
+
+        assert_eq!(Mode::User, cpu.mode());
+        assert_eq!(0x6000_0010, cpu.reg_get(Mode::User, reg::CPSR));
+        assert_eq!(0x1111_2222, cpu.reg_get(Mode::User, reg::SP));
+        assert_eq!(0x3333_4444, cpu.reg_get(Mode::User, reg::LR));
+        assert_eq!(0x5555_6666, cpu.reg_get(Mode::User, reg::PC));
+        assert_eq!(0x20c, cpu.reg_get(Mode::Supervisor, 2));
+        assert_eq!(0xaaaa_0000, cpu.reg_get(Mode::Supervisor, reg::SP));
+        assert_eq!(0xbbbb_1111, cpu.reg_get(Mode::Supervisor, reg::LR));
+    }
 }

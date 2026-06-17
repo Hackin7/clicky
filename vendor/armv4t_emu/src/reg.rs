@@ -125,24 +125,20 @@ impl RegFile {
 
     #[inline]
     pub fn set(&mut self, bank: usize, reg: Reg, mut val: u32) {
-        if reg == CPSR {
+        if reg == CPSR || reg == SPSR {
             let bits = val.extract(0, 5) as u8;
             let mode = Mode::from_bits(bits);
             if mode.is_none() {
-                // Switching to an invalid mode leads to unpredictable behavior.
-                //
-                // Panicking here would be unnecessarily harsh, as the error is
-                // originating from emulated code, which the end-user might not
-                // have written themselves.
-                //
-                // Instead, we take a page out of QEMU's book and simply leave
-                // the mode bits unchanged, while logging an error.
+                // Switching or returning to an invalid mode leads to unpredictable
+                // behavior. Preserve the previous mode bits so emulated software
+                // cannot poison the active CPSR or a later SPSR restore.
                 error!(
-                    "Attempted to write to CPSR with invalid mode bits: {:#x}",
+                    "Attempted to write to {} with invalid mode bits: {:#x}",
+                    if reg == CPSR { "CPSR" } else { "SPSR" },
                     bits
                 );
 
-                let oldval = self.reg[CPSR as usize];
+                let oldval = self.reg[REG_MAP[bank][reg as usize]];
                 val = (val & !0x1f) | (oldval & 0x1f);
             }
         }
