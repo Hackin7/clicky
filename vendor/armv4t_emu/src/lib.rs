@@ -95,10 +95,22 @@ pub trait Memory {
     fn w16(&mut self, addr: u32, val: u16);
     /// Write a 32-bit `val` to `addr`
     fn w32(&mut self, addr: u32, val: u32);
+
+    /// Read a 16-bit value from `addr`, instruction interface (defaults to data interface)
+    fn x16(&mut self, addr: u32) -> u16 {
+        self.r16(addr)
+    }
+    /// Read a 32-bit value from `addr`, instruction interface (defaults to data interface)
+    fn x32(&mut self, addr: u32) -> u32 {
+        self.r32(addr)
+    }
 }
 
 /// An emulated CPU which implements the ARMv4T instruction set.
-#[derive(Copy, Clone, PartialEq, Eq)]
+
+// CPU cannot derive `Copy` or `Clone` if the `advanced_disasm` feature is enabled because
+// `Capstone` does not implement those traits.
+#[cfg_attr(not(feature = "advanced_disasm"), derive(Copy, Clone, PartialEq, Eq))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Cpu {
     /// Registers
