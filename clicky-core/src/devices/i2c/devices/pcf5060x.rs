@@ -219,6 +219,7 @@ struct Pcf5060xImpl {
     mbcc2: u8,
     rtc_alarm: [u8; 7],
     bvmc: u8,
+    acdc1: u8,
     gp0c1: u8,
     adcc2: u8,
 }
@@ -235,6 +236,7 @@ impl Pcf5060xImpl {
             mbcc2: 0,
             rtc_alarm: [0; 7],
             bvmc: 0,
+            acdc1: 0,
             gp0c1: 0x04,
             adcc2: 0,
         }
@@ -355,6 +357,8 @@ impl Pcf5060xImpl {
             ADCS1__ | ADCS2__ | ADCS3__ => self.get_adc_readout(reg),
             // Battery Voltage Monitor (BVM)
             BVMC___ => Ok(self.bvmc),
+            // Accessory charger control
+            ACDC1__ => Ok(self.acdc1),
             GPOC1__ => Ok(self.gp0c1),
             _ => Err(Unimplemented),
         }
@@ -405,6 +409,8 @@ impl Pcf5060xImpl {
             ADCS3__ => Err(InvalidAccess),
             // Battery Voltage Monitor (BVM)
             BVMC___ => Ok(self.bvmc = data),
+            // Accessory charger control
+            ACDC1__ => Ok(self.acdc1 = data),
             GPOC1__ => Ok(self.gp0c1 = data),
             _ => Err(Unimplemented),
         }
@@ -416,6 +422,18 @@ mod tests {
     use super::*;
 
     use crate::error::MemException;
+
+    #[test]
+    fn acdc1_write_is_stored() {
+        let mut pcf = Pcf5060x::new();
+
+        pcf.write(Reg::ACDC1__ as u8).unwrap();
+        pcf.write(0x80).unwrap();
+        pcf.write_done().unwrap();
+
+        pcf.write(Reg::ACDC1__ as u8).unwrap();
+        assert_eq!(pcf.read().unwrap(), 0x80);
+    }
 
     #[test]
     fn adcs2_read_with_default_mux_reports_ready() {

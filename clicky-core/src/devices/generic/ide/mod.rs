@@ -405,6 +405,7 @@ impl IdeDrive {
                 self.iobuf.new_transfer();
                 self.state = IdeDriveState::WriteReady;
                 (self.reg.status)
+                    .set_bit(reg::STATUS::DRDY, true)
                     .set_bit(reg::STATUS::DRQ, true)
                     .set_bit(reg::STATUS::BSY, false);
 
@@ -640,7 +641,7 @@ impl IdeDrive {
                     (self.reg.status)
                         .set_bit(reg::STATUS::BSY, false)
                         .set_bit(reg::STATUS::DSC, true)
-                        .set_bit(reg::STATUS::DRDY, false)
+                        .set_bit(reg::STATUS::DRDY, true)
                         .set_bit(reg::STATUS::DRQ, true);
 
                     // TODO: fire interrupt?
@@ -1016,6 +1017,25 @@ mod tests {
             .unwrap();
 
         assert!(ide.irq_state(IdeIdx::IDE0));
+        let status = ide.read8(IdeReg::AltStatus).unwrap();
+        assert!(!status.get_bit(reg::STATUS::BSY));
+        assert!(status.get_bit(reg::STATUS::DRDY));
+        assert!(status.get_bit(reg::STATUS::DSC));
+        assert!(status.get_bit(reg::STATUS::DRQ));
+    }
+
+    #[test]
+    fn write_sectors_reports_ready_while_requesting_data() {
+        let mut ide = controller_with_disk();
+        ide.write8(IdeReg::SectorCount, 1).unwrap();
+        ide.write8(IdeReg::SectorNo, 1).unwrap();
+        ide.write8(IdeReg::CylinderLo, 0).unwrap();
+        ide.write8(IdeReg::CylinderHi, 0).unwrap();
+        ide.write8(IdeReg::DeviceHead, 0xe0).unwrap();
+
+        ide.write8(IdeReg::Command, IdeCmd::WriteSectors as u8)
+            .unwrap();
+
         let status = ide.read8(IdeReg::AltStatus).unwrap();
         assert!(!status.get_bit(reg::STATUS::BSY));
         assert!(status.get_bit(reg::STATUS::DRDY));

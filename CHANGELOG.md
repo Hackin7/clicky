@@ -4,6 +4,9 @@ All notable changes to this project should be documented in this file. Future co
 
 ## Unreleased
 
+- Stored PCF5060x `ACDC1` writes so iPodLinux power-management setup no longer aborts on that register.
+- Kept IDE `DRDY` asserted while write-sector commands request PIO data, matching guest expectations during Linux disk writes.
+- Mapped iPodLinux PP5002 serial controller addresses to the existing UART emulation instead of a zero-returning stub.
 - Fixed CHS sector translation in IDE reads so Rockbox can address sectors through its legacy disk path.
 - Reported a ready non-busy status for absent secondary IDE drives so probing another drive does not poison the active disk state.
 - Fixed PP EIDE IRQ acknowledgement so IDE completions are preserved until the ATA status register is read, preventing guests from missing disk interrupts during boot.

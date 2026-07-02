@@ -9,6 +9,7 @@ pub struct Serial {
     fcr: u8,
     lcr: u8,
     mcr: u8,
+    spr: u8,
 }
 
 impl Serial {
@@ -20,6 +21,7 @@ impl Serial {
             fcr: 0,
             lcr: 0,
             mcr: 0,
+            spr: 0,
         }
     }
 }
@@ -63,8 +65,8 @@ impl Memory for Serial {
             0x10 => Err(StubRead(Info, self.mcr as u32)),
             // always ready to tx and rx
             0x14 => Ok(0x21),
-            0x18 => Err(Unimplemented),
-            0x1c => Err(Unimplemented),
+            0x18 => Ok(0),
+            0x1c => Err(StubRead(Info, self.spr as u32)),
             _ => Err(Unexpected),
         }
     }
@@ -86,8 +88,8 @@ impl Memory for Serial {
             0x0c => Err(StubWrite(Info, self.lcr = val)),
             0x10 => Err(StubWrite(Info, self.mcr = val)),
             0x14 => Err(InvalidAccess),
-            0x18 => Err(Unimplemented),
-            0x1c => Err(Unimplemented),
+            0x18 => Err(StubWrite(Info, ())),
+            0x1c => Err(StubWrite(Info, self.spr = val)),
             _ => Err(Unexpected),
         }
     }
